@@ -1,0 +1,78 @@
+import json
+import numpy as np
+import cv2
+from pycocotools import mask
+import os
+
+def coco_to_yolo_segmentation(coco_json_path, output_dir):
+    # 读取COCO格式的JSON文件
+    with open(coco_json_path, 'r') as f:
+        coco_data = json.load(f)
+
+    # 创建输出目录
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 读取基本信息
+    images = {img["id"]: img for img in coco_data["images"]}
+    annotations = coco_data["annotations"]
+    categories = {cat["id"]: cat["name"] for cat in coco_data["categories"]}
+
+    print("Categories:", categories)  # 检查类别映射关系
+
+    # 遍历所有标注
+    for ann in annotations:
+        image_id = ann["image_id"]
+        image_info = images[image_id]
+        image_file_name = image_info["file_name"]
+
+        # 检查RLE格式的分割标注
+        if isinstance(ann["segmentation"], dict) and "counts" in ann["segmentation"]:
+            rle = ann["segmentation"]
+
+            # 将未压缩的RLE（list格式）转换为压缩RLE（标准COCO格式）
+            if isinstance(rle['counts'], list):
+                rle = mask.frPyObjects(rle, rle['size'][0], rle['size'][1])
+
+            # 解码RLE为mask
+            binary_mask = mask.decode(rle)
+
+            # 查找mask的外部轮廓
+            contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            # 提取轮廓坐标点（YOLO格式要求以多边形点的形式）
+            segmentation = []
+            for contour in contours:
+                if contour.size >= 6:  # 至少三个点，防止轮廓太小被忽略
+                    segmentation.append(contour.flatten().tolist())
+
+            # 如果没有有效的分割结果，跳过该标注
+            if not segmentation:
+                continue
+
+            # YOLO格式：图像路径（相对于数据集根目录）、类别、分割坐标
+            yolo_annotation = {
+                "image": os.path.join(output_dir, image_file_name),
+                "category": categories[ann["category_id"]],
+                "segmentation": segmentation
+            }
+
+            # 检查类别ID和标注数据
+            print(f"Processing image: {image_file_name}, Category ID: {ann['category_id']}, "
+                  f"Category Name: {categories[ann['category_id']]}, "
+                  f"Contours Count: {len(contours)}")
+
+            # 保存YOLO格式的标注文件
+            output_file = os.path.join(output_dir, f"{os.path.splitext(image_file_name)[0]}.txt")
+            with open(output_file, 'a') as out_f:  # 使用 'a' 模式，防止文件被覆盖
+                for seg in segmentation:
+                    # YOLOv8格式：类别ID（从0开始）+归一化的多边形坐标点
+                    class_id = ann["category_id"]
+                    normalized_segmentation = [(x / image_info["width"], y / image_info["height"]) for x, y in zip(seg[::2], seg[1::2])]
+                    flattened_coords = ' '.join([f"{x:.6f} {y:.6f}" for x, y in normalized_segmentation])
+                    out_f.write(f"{class_id} {flattened_coords}\n")
+
+if __name__ == "__main__":
+    # 使用示例
+    coco_json_path = "ann.json"  # 输入COCO格式的标注文件路径
+    output_dir = "yolov8_segmentation_labels"  # 输出目录（YOLO格式标注文件）
+    coco_to_yolo_segmentation(coco_json_path, output_dir)
