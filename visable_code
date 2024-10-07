@@ -1,0 +1,52 @@
+import cv2
+import os
+import numpy as np
+
+# 可视化函数
+def visualize_yolo_segmentation(image_path, label_txt_path, output_path=None):
+    # 读取图像
+    image = cv2.imread(image_path)
+    if image is None:
+        print(f"Failed to load image: {image_path}")
+        return
+
+    # 图像的宽度和高度
+    img_height, img_width = image.shape[:2]
+
+    # 读取YOLO格式的标签文件
+    with open(label_txt_path, 'r') as f:
+        lines = f.readlines()
+
+    # 遍历标签文件中的每一行
+    for line in lines:
+        parts = line.strip().split()
+        class_id = int(parts[0])  # 类别ID
+        poly_coords = np.array(parts[1:], dtype=float).reshape(-1, 2)  # 多边形坐标
+        # 将归一化坐标转换为图像绝对坐标
+        poly_coords[:, 0] = poly_coords[:, 0] * img_width  # x坐标恢复
+        poly_coords[:, 1] = poly_coords[:, 1] * img_height  # y坐标恢复
+
+        # 绘制多边形
+        poly_coords = poly_coords.astype(int)  # 坐标转换为整数
+        cv2.polylines(image, [poly_coords], isClosed=True, color=(0, 255, 0), thickness=2)
+        # 标注类别标签
+        cv2.putText(image, f"Class {class_id}", tuple(poly_coords[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+
+    # 显示或保存结果
+    if output_path:
+        cv2.imwrite(output_path, image)
+        print(f"Saved visualization to {output_path}")
+    else:
+        cv2.imshow("YOLOv8 Segmentation Visualization", image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+
+# 示例路径设置
+image_name = "FA0081_PRE_11.jpg"
+image_path = "FA0081_PRE_11.jpg"  # 图像文件路径
+label_txt_path = "yolov8_segmentation_labels/FA0081_PRE_11.txt"  # 对应的YOLO格式标签路径
+output_path = "output/FA0081_PRE_11_visualized.jpg"  # 保存结果的路径
+
+# 可视化YOLO格式分割标注
+visualize_yolo_segmentation(image_path, label_txt_path, output_path)
